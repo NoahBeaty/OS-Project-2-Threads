@@ -29,26 +29,43 @@ Eliejah Walker elwalker43@tntech.edu
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+from thread.h:
+- int64_t wakeup_tick: stores system tick count for thread wakeup time
+- struct list_elem sleep_elem: links thread into global sleeping thread list
+
+from timer.c:
+- static struct list sleeping_list: global list that stores all sleeping threads (the list is ordered by wakeup time)
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe what happens in a call to timer_sleep(),
 >> including the effects of the timer interrupt handler.
 
+- When timer_sleep() is called, the current thread records its wakeup tick, then it is inserted into an ordered sleeping list and blocked. Each timer interrupt increments the global tick count and unblocks threads whose wakeup time has arrived, allowing them to resume execution without busy-waiting.
+
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
+
+- It increments the global tick count and checks the front of the ordered sleeping list for threads whose wakeup time has arrived. Because the list is sorted by wakeup tick, only the earliest sleepers are examined. This minimizes iteration and keeps interrupt handling time as short as possible.
 
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+- Race conditions are avoided by disabling interrupts whenever the shared sleeping_list is accessed or modified. In timer_sleep(), interrupts are turned off before inserting the thread and blocking (interrupts restored afterward). Since the timer interrupt handler also runs with interrupts disabled, both functions can safely access the list without interference. This prevents modifications made at the same time.
+
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+
+- Race conditions are avoided by disabling interrupts (using intr_disable() ), before modifying the shared sleeping_list inside timer_sleep(). This prevents the timer interrupt handler from accessing or changing the list at the same time. Since the interrupt handler also runs with interrupts disabled by default, both functions are protected from access to shared data at the same time.
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+
+- I used the sleeping threads/sleep list design because it allows the CPU to perform other work instead of repeatedly checking wakeup times. Compared to the busy-waiting design, the sleep list design drastically reduces wasted CPU cycles. It's also simpler than using semaphores, which would require extra sync logic.
 
 			 PRIORITY SCHEDULING
 			 ===================
