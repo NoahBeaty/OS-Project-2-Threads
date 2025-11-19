@@ -15,7 +15,6 @@
 #include "lib/kernel/list.h"
 #include <inttypes.h>
 
-
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -76,21 +75,16 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 
-
-
-
 // comparator enables ordered insertion into list
-static bool higher_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+static bool 
+higher_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
   // converts list elements into thread structures
   const struct thread *ta = list_entry (a, struct thread, elem);
   const struct thread *tb = list_entry (b, struct thread, elem);
   // returns true if thread A has higher priority than thread B
   return ta->priority > tb->priority;
 }
-
-
-
-
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -221,7 +215,8 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
-    /* Yield if the new thread has higher priority than current */
+  
+  /* Yield if the new thread has higher priority than current */
   if (t->priority > thread_current()->priority)
     thread_yield();
 
@@ -365,17 +360,23 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-
+  enum intr_level old_level = intr_disable();
+  
   struct thread *cur = thread_current();
-  cur->priority = new_priority;
+  cur->original_priority = new_priority;
+  
+  /* Recalculate effective priority (considering donations). */
+  thread_update_priority(cur);
+  
+  intr_set_level(old_level);
 
   // Yield if a higher-priority thread is ready
   if (!list_empty(&ready_list)) 
   {
-      // if thread priority is higher than the current thread’s new priority, call thread_yield()
-      struct thread *t = list_entry(list_front(&ready_list), struct thread, elem);
-      if (t->priority > cur->priority)
-          thread_yield();
+    // if thread priority is higher than the current thread's new priority, call thread_yield()
+    struct thread *t = list_entry(list_front(&ready_list), struct thread, elem);
+    if (t->priority > cur->priority)
+      thread_yield();
   }
 }
 
@@ -384,6 +385,81 @@ int
 thread_get_priority (void) 
 {
   return thread_current ()->priority;
+}
+
+/* Donate priority through chain of lock holders (for nested donation). */
+void
+thread_donate_priority(struct thread *donator, struct thread *recipient)
+{
+  ASSERT (intr_get_level() == INTR_OFF);
+  
+  int depth = 0;
+  int donated_priority = donator->priority;
+  
+  /* Follow chain up to 8 levels deep. */
+  while (recipient != NULL && depth < 8)
+  {
+    /* Only donate if our priority is higher. */
+    if (donated_priority <= recipient->priority)
+      break;
+      
+    /* Donate priority. */
+    recipient->priority = donated_priority;
+    
+    /* If recipient is waiting on another lock, continue chain. */
+    if (recipient->waiting_on != NULL && recipient->waiting_on->holder != NULL)
+    {
+      recipient = recipient->waiting_on->holder;
+      depth++;
+    }
+    else
+    {
+      break;
+    }
+  }
+}
+
+/* Recalculate thread's priority based on donations. */
+void
+thread_update_priority(struct thread *t)
+{
+  ASSERT (intr_get_level() == INTR_OFF);
+  
+  /* Start with original priority. */
+  int max_priority = t->original_priority;
+  
+  /* Check all locks we hold for waiting threads. */
+  if (!list_empty(&t->locks_held))
+  {
+    struct list_elem *e;
+    for (e = list_begin(&t->locks_held); e != list_end(&t->locks_held); e = list_next(e))
+    {
+      struct lock *lock = list_entry(e, struct lock, elem);
+      
+      /* Find highest priority waiter on this lock. */
+      if (!list_empty(&lock->semaphore.waiters))
+      {
+        struct list_elem *we;
+        for (we = list_begin(&lock->semaphore.waiters); 
+             we != list_end(&lock->semaphore.waiters); 
+             we = list_next(we))
+        {
+          struct thread *waiter = list_entry(we, struct thread, elem);
+          if (waiter->priority > max_priority)
+            max_priority = waiter->priority;
+        }
+      }
+    }
+  }
+  
+  t->priority = max_priority;
+  
+  /* Re-sort ready list if this thread is in it. */
+  if (t->status == THREAD_READY)
+  {
+    list_remove(&t->elem);
+    list_insert_ordered(&ready_list, &t->elem, higher_priority, NULL);
+  }
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -416,7 +492,7 @@ thread_get_recent_cpu (void)
   /* Not yet implemented. */
   return 0;
 }
-
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -465,7 +541,7 @@ kernel_thread (thread_func *function, void *aux)
   function (aux);       /* Execute the thread function. */
   thread_exit ();       /* If function() returns, kill the thread. */
 }
-
+
 /* Returns the running thread. */
 struct thread *
 running_thread (void) 
@@ -503,16 +579,16 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->original_priority = priority;
   t->magic = THREAD_MAGIC;
 
-
-
+  /* Initialize priority donation fields. */
+  t->waiting_on = NULL;
+  list_init(&t->locks_held);
 
   // initialize alarm/timer fields
   // prevents newly initialized thread from accidentally appearing in the sleeping list
   t->wakeup_tick = INT64_MAX;
-
-
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -628,7 +704,7 @@ allocate_tid (void)
 
   return tid;
 }
-
+
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */
 uint32_t thread_stack_ofs = offsetof (struct thread, stack);
