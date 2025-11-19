@@ -89,10 +89,11 @@ I ensure that the highest priority thread waiting for a lock or semaphore wakes 
 
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?
+when a thread tries to grab a lock that someone else has, the thread donates it priority so they can finish faster. If they are also waiting on another threads lock, the priority get passed down the chain so all processes speed up
 
 >> B5: Describe the sequence of events when lock_release() is called
 >> on a lock that a higher-priority thread is waiting for.
-
+- the thread removes the lock from its held list and recalculates it priority based on donations remaining, and then wake up high priority waiting who can preempt it if it has higher prio
 ---- SYNCHRONIZATION ----
 
 >> B6: Describe a potential race in thread_set_priority() and explain
