@@ -107,6 +107,10 @@ My implementation of thread_set_priority disables interrupts before updating the
 I chose this design for priority scheduling because list ordering using comparator functions is simple and uses existing data structures, making strict priority scheduling trivial without adding complex code.
 I also tried to do a lock instead of disabling interrupts for thread_set_priority() but was having difficulty getting it to work so I instead tried interrupts instead because it made it simpler and should not take off points because I only used it for scheduling and used locks otherwise.
 
+I picked this design because it's simple and efficient. By just tracking which lock each thread is waiting on and what locks it holds, we can follow donation chains recursively without complicated data structures. 
+I thought about keeping lists of who's donating to whom, but that would be way more overhead and harder to debug. Our approach only stores what's needed and recalculates priorities when locks are released, which keeps things clean.
+
+
 			   SURVEY QUESTIONS
 			   ================
 
