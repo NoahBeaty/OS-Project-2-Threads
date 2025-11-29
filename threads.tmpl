@@ -80,6 +80,27 @@ I added the comparator functions sema_priority_cmp for semaphores, and higher_pr
 >> B2: Explain the data structure used to track priority donation.
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
+The stuct Thread and the struct Lock were modified to track priority donation. Each thread now has a list of locks it holds (held_locks) and a pointer to the lock it is currently waiting on (waiting_lock). This allows us to follow donation chains recursively.
+For example, consider three threads: T1 (priority 10), T2 (priority 20), and T3 (priority 30).
+- T1 holds Lock A.
+- T2 is waiting for Lock A (donates priority 20 to T1).
+- T3 is waiting for Lock B, which T2 holds (donates priority 30
+to T2, which in turn donates to T1).
+
+ascii art chart:
+             +-------+          +-------+          +-------+
+            |  T3   |          |  T2   |          |  T1   |
+            | Prio30|          | Prio20|          | Prio10|
+            +-------+          +-------+          +-------+
+                |                  |                  |
+            waiting for         waiting for         holds
+              Lock B             Lock A             Lock A
+                |                  |                  |
+                v                  v                  v
+            +-------+          +-------+          +-------+
+            | donates| ----->  | donates| ----->  | final |
+            |  30    |         |  30    |         |  30   |
+            +-------+          +-------+          +-------+
 
 ---- ALGORITHMS ----
 
